@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "TransportLoad": {
+      "title": "TransportLoad",
+      "description": "A transport trip recorded with vehicle number, load company, route, weight, rate, and calculated freight.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "vehicleNumber": { "type": "string", "maxLength": 30 },
+        "driverContact": { "type": "string", "maxLength": 30 },
+        "loadCompany": { "type": "string", "maxLength": 100 },
+        "loadingPoint": { "type": "string", "maxLength": 100 },
+        "destination": { "type": "string", "maxLength": 100 },
+        "weight": { "type": "number" },
+        "rate": { "type": "number" },
+        "rateUnit": { "type": "string", "enum": ["Per MT", "Per Trip", "Not Specified"] },
+        "calculatedFreight": { "type": "number" },
+        "bookingDate": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "createdByEmail": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedByEmail": { "type": "string" }
+      },
+      "required": ["id", "vehicleNumber", "loadCompany", "loadingPoint", "destination", "weight", "rate", "rateUnit", "bookingDate"]
+    },
+    "AdvanceRecord": {
+      "title": "AdvanceRecord",
+      "description": "An advance payment recorded for a vehicle with sender, amount, payment date, and automatic load matching status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "advanceSender": { "type": "string", "maxLength": 100 },
+        "vehicleNumber": { "type": "string", "maxLength": 30 },
+        "amount": { "type": "number" },
+        "paymentDate": { "type": "string" },
+        "matchingStatus": { "type": "string", "enum": ["auto-linked", "manually-linked", "multiple-possible", "unmatched"] },
+        "matchedLoadId": { "type": "string" },
+        "possibleLoadIds": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "createdByEmail": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedByEmail": { "type": "string" }
+      },
+      "required": ["id", "advanceSender", "vehicleNumber", "amount", "paymentDate", "matchingStatus"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Automatic audit trail recording actions performed by administrators.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string" },
+        "description": { "type": "string" },
+        "entityType": { "type": "string" },
+        "entityId": { "type": "string" },
+        "vehicleNumber": { "type": "string" },
+        "performedByEmail": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "action", "description", "performedByEmail", "timestamp"]
+    },
+    "AdminPresence": {
+      "title": "AdminPresence",
+      "description": "Online presence and last active timestamp of authorized administrators.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "lastActive": { "type": "string" },
+        "isOnline": { "type": "boolean" },
+        "currentDevice": { "type": "string" }
+      },
+      "required": ["email", "lastActive"]
+    }
+  },
+  "firestore": {
+    "/loads/{loadId}": {
+      "schema": "TransportLoad",
+      "description": "Collection of all transport load records"
+    },
+    "/advances/{advanceId}": {
+      "schema": "AdvanceRecord",
+      "description": "Collection of advance payments for vehicles"
+    },
+    "/activity_logs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Chronological audit trail of admin actions"
+    },
+    "/admin_presence/{adminId}": {
+      "schema": "AdminPresence",
+      "description": "Real-time presence and last seen timestamps of administrators"
+    },
+    "/system_info/{infoId}": {
+      "schema": { "$ref": "object" },
+      "description": "System connectivity verification documents"
+    }
+  }
+}

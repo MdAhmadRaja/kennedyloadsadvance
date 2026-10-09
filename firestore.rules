@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Strictly authorize only the two designated administrator accounts
+    function isKennedyAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'ahmadalltech123@gmail.com' ||
+        request.auth.token.email == 'sji200947@gmail.com'
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128;
+    }
+
+    // 1. Loads Collection
+    match /loads/{loadId} {
+      allow read: if isKennedyAdmin();
+      allow create: if isKennedyAdmin()
+        && isValidId(loadId)
+        && request.resource.data.vehicleNumber is string
+        && request.resource.data.loadCompany is string
+        && request.resource.data.loadingPoint is string
+        && request.resource.data.destination is string
+        && request.resource.data.weight is number
+        && request.resource.data.rate is number;
+      allow update: if isKennedyAdmin() && isValidId(loadId);
+      allow delete: if isKennedyAdmin() && isValidId(loadId);
+    }
+
+    // 2. Advances Collection
+    match /advances/{advanceId} {
+      allow read: if isKennedyAdmin();
+      allow create: if isKennedyAdmin()
+        && isValidId(advanceId)
+        && request.resource.data.advanceSender is string
+        && request.resource.data.vehicleNumber is string
+        && request.resource.data.amount is number
+        && request.resource.data.paymentDate is string;
+      allow update: if isKennedyAdmin() && isValidId(advanceId);
+      allow delete: if isKennedyAdmin() && isValidId(advanceId);
+    }
+
+    // 3. Activity Logs Collection (Protected Immutable Audit Trail)
+    match /activity_logs/{logId} {
+      allow read: if isKennedyAdmin();
+      allow create: if isKennedyAdmin() && isValidId(logId);
+      allow update, delete: if false; // Audit logs can never be altered or removed
+    }
+
+    // 4. Admin Presence Collection
+    match /admin_presence/{adminId} {
+      allow read: if isKennedyAdmin();
+      allow write: if isKennedyAdmin() && isValidId(adminId);
+    }
+
+    // 5. System Info (Connection testing)
+    match /system_info/{infoId} {
+      allow read: if isKennedyAdmin();
+      allow write: if isKennedyAdmin();
+    }
+  }
+}
