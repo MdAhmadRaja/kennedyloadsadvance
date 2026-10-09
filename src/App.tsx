@@ -10,13 +10,15 @@ import { ExportReports } from './components/ExportReports';
 import { ActivityHistory } from './components/ActivityHistory';
 import { AddLoadModal } from './components/AddLoadModal';
 import { AddAdvanceModal } from './components/AddAdvanceModal';
-import { MatchReviewModal } from './components/MatchReviewModal';
+import { SettleRestBalanceModal } from './components/SettleRestBalanceModal';
 import { HelpSetupModal } from './components/HelpSetupModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   TransportLoad,
   AdvanceRecord,
   ActivityLog,
   AdminPresence,
+  TripRecord,
 } from './types';
 import {
   subscribeToLoads,
@@ -50,10 +52,9 @@ const MainApp: React.FC = () => {
 
   const [prefillVehicle, setPrefillVehicle] = useState<string>('');
 
-  // Match Review Modal State
-  const [reviewAdvance, setReviewAdvance] = useState<AdvanceRecord | null>(null);
-  const [reviewLoads, setReviewLoads] = useState<TransportLoad[]>([]);
-  const [isMatchReviewOpen, setIsMatchReviewOpen] = useState(false);
+  // Settle Rest Balance Modal State
+  const [settleTrip, setSettleTrip] = useState<TripRecord | null>(null);
+  const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);
 
   // Help & Setup Guide Modal
   const [isHelpOpen, setIsHelpOpen] = useState(false);
@@ -78,10 +79,10 @@ const MainApp: React.FC = () => {
       }
     });
 
-    const unsubLoads = subscribeToLoads((data) => setLoads(data));
-    const unsubAdvances = subscribeToAdvances((data) => setAdvances(data));
-    const unsubLogs = subscribeToActivityLogs((data) => setActivityLogs(data));
-    const unsubPresence = subscribeToAdminPresence((data) => setPresences(data));
+    const unsubLoads = subscribeToLoads((data) => setLoads(data || []));
+    const unsubAdvances = subscribeToAdvances((data) => setAdvances(data || []));
+    const unsubLogs = subscribeToActivityLogs((data) => setActivityLogs(data || []));
+    const unsubPresence = subscribeToAdminPresence((data) => setPresences(data || []));
 
     return () => {
       registerFirestoreErrorListener(null);
@@ -124,11 +125,10 @@ const MainApp: React.FC = () => {
     setIsAddAdvanceOpen(true);
   };
 
-  // Open Match Review Modal
-  const handleOpenMatchReview = (adv: AdvanceRecord, candidateLoads: TransportLoad[]) => {
-    setReviewAdvance(adv);
-    setReviewLoads(candidateLoads);
-    setIsMatchReviewOpen(true);
+  // Open Settle Rest Balance Modal
+  const handleOpenSettleModal = (trip: TripRecord) => {
+    setSettleTrip(trip);
+    setIsSettleModalOpen(true);
   };
 
   if (authLoading) {
@@ -148,7 +148,7 @@ const MainApp: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col font-sans">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans antialiased">
       {/* Header & Nav */}
       <Navbar
         activeTab={activeTab}
@@ -159,7 +159,7 @@ const MainApp: React.FC = () => {
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {permissionNotice && (
           <div className="mb-6 bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start justify-between gap-3 shadow-xs">
             <div className="flex items-start gap-3">
@@ -192,67 +192,71 @@ const MainApp: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'dashboard' && (
-          <Dashboard
-            loads={loads}
-            advances={advances}
-            presences={presences}
-            currentAdminEmail={currentUser.email}
-            onOpenAddLoad={() => handleOpenAddLoad()}
-            onOpenAddAdvance={() => handleOpenAddAdvance()}
-            onSelectVehicle={handleSelectVehicle}
-            onNavigateTab={setActiveTab}
-            onReviewMatch={handleOpenMatchReview}
-          />
-        )}
+        <ErrorBoundary fallbackTitle="Error displaying section. Click Try Again to reload.">
+          {activeTab === 'dashboard' && (
+            <Dashboard
+              loads={loads}
+              advances={advances}
+              presences={presences}
+              currentAdminEmail={currentUser.email}
+              onOpenAddLoad={() => handleOpenAddLoad()}
+              onOpenAddAdvance={() => handleOpenAddAdvance()}
+              onSelectVehicle={handleSelectVehicle}
+              onNavigateTab={setActiveTab}
+              onSettleRestBalance={handleOpenSettleModal}
+            />
+          )}
 
-        {activeTab === 'loads' && (
-          <LoadRegister
-            loads={loads}
-            advances={advances}
-            onOpenAddLoad={() => handleOpenAddLoad()}
-            onEditLoad={handleEditLoad}
-            onSelectVehicle={handleSelectVehicle}
-          />
-        )}
+          {activeTab === 'loads' && (
+            <LoadRegister
+              loads={loads}
+              advances={advances}
+              onOpenAddLoad={() => handleOpenAddLoad()}
+              onEditLoad={handleEditLoad}
+              onSelectVehicle={handleSelectVehicle}
+              onSettleRestBalance={handleOpenSettleModal}
+            />
+          )}
 
-        {activeTab === 'advances' && (
-          <AdvanceRegister
-            advances={advances}
-            loads={loads}
-            onOpenAddAdvance={() => handleOpenAddAdvance()}
-            onEditAdvance={handleEditAdvance}
-            onSelectVehicle={handleSelectVehicle}
-            onReviewMatch={handleOpenMatchReview}
-          />
-        )}
+          {activeTab === 'advances' && (
+            <AdvanceRegister
+              advances={advances}
+              loads={loads}
+              onOpenAddAdvance={() => handleOpenAddAdvance()}
+              onEditAdvance={handleEditAdvance}
+              onSelectVehicle={handleSelectVehicle}
+              onSettleRestBalance={handleOpenSettleModal}
+            />
+          )}
 
-        {activeTab === 'vehicleSearch' && (
-          <VehicleSearch
-            loads={loads}
-            advances={advances}
-            initialVehicleNumber={searchVehicleNumber}
-            onOpenAddLoadForVehicle={(v) => handleOpenAddLoad(v)}
-            onOpenAddAdvanceForVehicle={(v) => handleOpenAddAdvance(v)}
-            onEditLoad={handleEditLoad}
-            onEditAdvance={handleEditAdvance}
-          />
-        )}
+          {activeTab === 'vehicleSearch' && (
+            <VehicleSearch
+              loads={loads}
+              advances={advances}
+              initialVehicleNumber={searchVehicleNumber}
+              onOpenAddLoadForVehicle={(v) => handleOpenAddLoad(v)}
+              onOpenAddAdvanceForVehicle={(v) => handleOpenAddAdvance(v)}
+              onSettleRestBalance={handleOpenSettleModal}
+              onEditLoad={handleEditLoad}
+              onEditAdvance={handleEditAdvance}
+            />
+          )}
 
-        {activeTab === 'export' && (
-          <ExportReports
-            loads={loads}
-            advances={advances}
-            activityLogs={activityLogs}
-          />
-        )}
+          {activeTab === 'export' && (
+            <ExportReports
+              loads={loads}
+              advances={advances}
+              activityLogs={activityLogs}
+            />
+          )}
 
-        {activeTab === 'activity' && (
-          <ActivityHistory
-            activityLogs={activityLogs}
-            onSelectVehicle={handleSelectVehicle}
-          />
-        )}
+          {activeTab === 'activity' && (
+            <ActivityHistory
+              activityLogs={activityLogs}
+              onSelectVehicle={handleSelectVehicle}
+            />
+          )}
+        </ErrorBoundary>
       </main>
 
       {/* Footer */}
@@ -285,6 +289,8 @@ const MainApp: React.FC = () => {
         onClose={() => setIsAddLoadOpen(false)}
         editLoad={editingLoad}
         prefillVehicleNumber={prefillVehicle}
+        loads={loads}
+        advances={advances}
       />
 
       <AddAdvanceModal
@@ -292,14 +298,13 @@ const MainApp: React.FC = () => {
         onClose={() => setIsAddAdvanceOpen(false)}
         editAdvance={editingAdvance}
         prefillVehicleNumber={prefillVehicle}
-        onShowMatchReview={(adv, candidates) => handleOpenMatchReview(adv, candidates)}
+        loads={loads}
       />
 
-      <MatchReviewModal
-        isOpen={isMatchReviewOpen}
-        onClose={() => setIsMatchReviewOpen(false)}
-        advance={reviewAdvance}
-        loadsForVehicle={reviewLoads}
+      <SettleRestBalanceModal
+        isOpen={isSettleModalOpen}
+        onClose={() => setIsSettleModalOpen(false)}
+        trip={settleTrip}
       />
 
       <HelpSetupModal

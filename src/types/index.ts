@@ -1,21 +1,33 @@
 export type RateUnit = 'Per MT' | 'Per Trip' | 'Not Specified';
 
-export type MatchingStatus = 'auto-linked' | 'manually-linked' | 'multiple-possible' | 'unmatched';
+export type TripLifecycleStatus =
+  | 'pending_advance' // Load booked, no advance yet
+  | 'pending_settlement' // Advance received, reached destination / waiting for rest balance
+  | 'completed'; // Advance paid AND rest balance paid
 
 export interface TransportLoad {
   id: string;
-  vehicleNumber: string; // Required, normalized uppercase
-  driverContact?: string; // Optional
-  loadCompany: string; // Required
-  loadingPoint: string; // Required
-  destination: string; // Required
+  vehicleNumber: string; // e.g. JH11D 0037
+  cleanVehicleKey: string; // normalized canonical key: JH11D0037
+  driverContact?: string;
+  loadCompany: string;
+  loadingPoint: string;
+  destination: string;
   weight: number; // in Metric Tonnes (MT)
   rate: number; // in Rupees
-  rateUnit: RateUnit; // Per MT | Per Trip | Not Specified
-  calculatedFreight: number; // auto-calculated: Per MT => weight * rate, Per Trip => rate
+  rateUnit: RateUnit;
+  calculatedFreight: number;
   bookingDate: string; // YYYY-MM-DD
+
+  // Rest Balance (Destination reached & Load return final settlement)
+  isRestBalanceSettled?: boolean;
+  restBalanceAmount?: number; // Amount settled
+  restBalanceDate?: string; // Date rest balance was paid
+  restBalancePaidBy?: string; // Who paid the rest balance
+  restBalanceNotes?: string;
+
   createdAt: string; // ISO string
-  createdByEmail: string; // admin email
+  createdByEmail: string;
   createdByName?: string;
   updatedAt: string; // ISO string
   updatedByEmail: string;
@@ -23,13 +35,12 @@ export interface TransportLoad {
 
 export interface AdvanceRecord {
   id: string;
-  advanceSender: string; // e.g. Samir Dad (Required)
-  vehicleNumber: string; // Required, normalized uppercase
-  amount: number; // in Rupees (Required)
-  paymentDate: string; // YYYY-MM-DD (Required)
-  matchingStatus: MatchingStatus;
-  matchedLoadId?: string | null; // linked load reference
-  possibleLoadIds?: string[]; // if multiple candidates
+  advanceSender: string; // e.g. Samir Dad
+  vehicleNumber: string;
+  cleanVehicleKey: string; // normalized canonical key: JH11D0037
+  amount: number; // in Rupees
+  paymentDate: string; // YYYY-MM-DD
+  loadId?: string; // Optional direct load association
   createdAt: string; // ISO string
   createdByEmail: string;
   updatedAt: string; // ISO string
@@ -38,9 +49,19 @@ export interface AdvanceRecord {
 
 export interface ActivityLog {
   id: string;
-  action: 'create_load' | 'update_load' | 'delete_load' | 'create_advance' | 'update_advance' | 'delete_advance' | 'match_advance' | 'unlink_advance' | 'backup_export' | 'backup_restore' | 'admin_login';
+  action:
+    | 'create_load'
+    | 'update_load'
+    | 'delete_load'
+    | 'create_advance'
+    | 'update_advance'
+    | 'delete_advance'
+    | 'settle_rest_balance'
+    | 'backup_export'
+    | 'backup_restore'
+    | 'admin_login';
   description: string;
-  entityType: 'load' | 'advance' | 'system';
+  entityType: 'load' | 'advance' | 'settlement' | 'system';
   entityId?: string;
   vehicleNumber?: string;
   performedByEmail: string;
@@ -56,12 +77,18 @@ export interface AdminPresence {
   currentDevice?: string;
 }
 
-export interface VehicleSummary {
-  vehicleNumber: string;
-  loads: TransportLoad[];
+// Full Trip Context combining Load, matching Advances, and Rest Balance
+export interface TripRecord {
+  load: TransportLoad;
   advances: AdvanceRecord[];
-  totalFreight: number;
   totalAdvances: number;
-  linkedAdvances: number;
-  balance: number;
+  advanceDate: string | null;
+  advanceSender: string | null;
+  freight: number;
+  restBalanceDue: number;
+  isRestSettled: boolean;
+  restSettledDate: string | null;
+  restSettledPaidBy: string | null;
+  restSettledAmount: number;
+  status: TripLifecycleStatus;
 }

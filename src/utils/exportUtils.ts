@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { TransportLoad, AdvanceRecord, ActivityLog } from '../types';
-import { formatCurrency } from './formatUtils';
+import { formatCurrency, cleanVehicleKey, safeDateDisplay } from './formatUtils';
 
 export interface ExportFilterOptions {
   startDate?: string;
@@ -19,13 +19,14 @@ export function filterRecords(
   activityLogs: ActivityLog[],
   options: ExportFilterOptions
 ) {
-  const normVehicle = options.vehicleNumber?.trim().toUpperCase();
+  const normVehicle = options.vehicleNumber ? cleanVehicleKey(options.vehicleNumber) : '';
   const normCompany = options.company?.trim().toLowerCase();
 
   // Filter Loads
-  const filteredLoads = loads.filter((load) => {
-    if (normVehicle && !load.vehicleNumber.includes(normVehicle)) return false;
-    if (normCompany && !load.loadCompany.toLowerCase().includes(normCompany)) return false;
+  const filteredLoads = (loads || []).filter((load) => {
+    if (!load) return false;
+    if (normVehicle && !cleanVehicleKey(load.vehicleNumber).includes(normVehicle)) return false;
+    if (normCompany && !(load.loadCompany || '').toLowerCase().includes(normCompany)) return false;
 
     if (options.noDateLimit) return true;
 
@@ -33,7 +34,6 @@ export function filterRecords(
     if (options.dateBasis === 'bookingDate') {
       targetDateStr = load.bookingDate;
     } else {
-      // createdDate or default
       targetDateStr = load.createdAt ? load.createdAt.split('T')[0] : '';
     }
 
@@ -44,8 +44,9 @@ export function filterRecords(
   });
 
   // Filter Advances
-  const filteredAdvances = advances.filter((adv) => {
-    if (normVehicle && !adv.vehicleNumber.includes(normVehicle)) return false;
+  const filteredAdvances = (advances || []).filter((adv) => {
+    if (!adv) return false;
+    if (normVehicle && !cleanVehicleKey(adv.vehicleNumber).includes(normVehicle)) return false;
 
     if (options.noDateLimit) return true;
 
@@ -53,7 +54,6 @@ export function filterRecords(
     if (options.dateBasis === 'paymentDate') {
       targetDateStr = adv.paymentDate;
     } else {
-      // createdDate or bookingDate fallback
       targetDateStr = adv.createdAt ? adv.createdAt.split('T')[0] : '';
     }
 
@@ -64,8 +64,9 @@ export function filterRecords(
   });
 
   // Filter Activities
-  const filteredLogs = activityLogs.filter((log) => {
-    if (normVehicle && log.vehicleNumber && !log.vehicleNumber.includes(normVehicle)) return false;
+  const filteredLogs = (activityLogs || []).filter((log) => {
+    if (!log) return false;
+    if (normVehicle && log.vehicleNumber && !cleanVehicleKey(log.vehicleNumber).includes(normVehicle)) return false;
 
     if (options.noDateLimit) return true;
 
@@ -112,7 +113,7 @@ export function generatePDFReport(
   doc.setFontSize(10);
   doc.text('Transport Desk Management & Financial Report', 14, 18);
 
-  const rightText = `Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()} | By: ${generatedByEmail}`;
+  const rightText = `Generated: ${new Date().toLocaleDateString()} | By: ${generatedByEmail}`;
   doc.setFontSize(8);
   doc.text(rightText, pageWidth - 14, 15, { align: 'right' });
 
@@ -153,9 +154,9 @@ export function generatePDFReport(
   yPos += 7;
 
   // Financial Highlights Bar
-  const totalFreight = filteredLoads.reduce((sum, l) => sum + (l.calculatedFreight || 0), 0);
-  const totalAdvance = filteredAdvances.reduce((sum, a) => sum + (a.amount || 0), 0);
-  const unmatchedAdvances = filteredAdvances.filter((a) => a.matchingStatus === 'unmatched');
+  const totalFreight = filteredLoads.reduce((sum, l) => sum + (Number(l.calculatedFreight) || 0), 0);
+  const totalAdvance = filteredAdvances.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
+  const totalSettledRest = filteredLoads.reduce((sum, l) => sum + (Number(l.restBalanceAmount) || 0), 0);
 
   doc.setFillColor(240, 253, 244); // light green bg
   doc.setDrawColor(187, 247, 208);
@@ -165,7 +166,7 @@ export function generatePDFReport(
   doc.setFontSize(9);
   doc.setTextColor(21, 128, 61);
   doc.text(
-    `Summary:  Loads: ${filteredLoads.length}  |  Advances: ${filteredAdvances.length}  |  Total Freight: Rs. ${formatCurrency(totalFreight)}  |  Total Advances: Rs. ${formatCurrency(totalAdvance)}  |  Unmatched Advances: ${unmatchedAdvances.length}`,
+    `Summary:  Loads: ${filteredLoads.length}  |  Advances: ${filteredAdvances.length}  |  Total Freight: Rs. ${formatCurrency(totalFreight)}  |  Total Advances: Rs. ${formatCurrency(totalAdvance)}  |  Settled Rest Balances: Rs. ${formatCurrency(totalSettledRest)}`,
     18,
     yPos + 8
   );
@@ -177,7 +178,7 @@ export function generatePDFReport(
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(15, 23, 42);
-    doc.text(`1. Load Register Records (${filteredLoads.length})`, 14, yPos);
+    doc.text(`1. Load Register & Settlement Records (${filteredLoads.length})`, 14, yPos);
     yPos += 4;
 
     const loadRows = filteredLoads.map((load) => [
@@ -185,12 +186,14 @@ export function generatePDFReport(
       load.loadCompany,
       `${load.loadingPoint} -> ${load.destination}`,
       `${load.weight} MT`,
-      `Rs. ${load.rate} (${load.rateUnit})`,
       `Rs. ${formatCurrency(load.calculatedFreight)}`,
       load.bookingDate,
+      load.isRestBalanceSettled
+        ? `Settled (Rs. ${formatCurrency(load.restBalanceAmount)})`
+        : 'Pending',
+      load.restBalanceDate ? safeDateDisplay(load.restBalanceDate) : '-',
+      load.restBalancePaidBy || '-',
       load.driverContact || '-',
-      load.createdByEmail.split('@')[0],
-      load.createdAt ? load.createdAt.split('T')[0] : '-',
     ]);
 
     autoTable(doc, {
@@ -201,12 +204,12 @@ export function generatePDFReport(
           'Company',
           'Route',
           'Weight',
-          'Rate',
           'Freight',
           'Booking Date',
+          'Rest Settlement',
+          'Settled Date',
+          'Paid By',
           'Driver Contact',
-          'Created By',
-          'Entry Date',
         ],
       ],
       body: loadRows.length > 0 ? loadRows : [['No load records found in range', '', '', '', '', '', '', '', '', '']],
@@ -239,8 +242,7 @@ export function generatePDFReport(
       adv.vehicleNumber,
       `Rs. ${formatCurrency(adv.amount)}`,
       adv.paymentDate,
-      adv.matchingStatus.toUpperCase(),
-      adv.matchedLoadId ? 'Linked' : 'Not Linked',
+      'Auto-Matched',
       adv.createdByEmail.split('@')[0],
       adv.createdAt ? adv.createdAt.split('T')[0] : '-',
     ]);
@@ -253,13 +255,12 @@ export function generatePDFReport(
           'Vehicle Number',
           'Amount (Rs.)',
           'Payment Date',
-          'Matching Status',
-          'Link Status',
-          'Created By',
+          'Match Method',
+          'Recorded By',
           'Entry Date',
         ],
       ],
-      body: advanceRows.length > 0 ? advanceRows : [['No advance records found in range', '', '', '', '', '', '', '']],
+      body: advanceRows.length > 0 ? advanceRows : [['No advance records found in range', '', '', '', '', '', '']],
       headStyles: { fillColor: [21, 128, 61], textColor: 255, fontSize: 8, fontStyle: 'bold' },
       styles: { fontSize: 8, cellPadding: 2 },
       alternateRowStyles: { fillColor: [248, 250, 252] },
@@ -283,7 +284,7 @@ export function generatePDFReport(
     yPos += 4;
 
     const logRows = filteredLogs.map((log) => [
-      log.timestamp ? new Date(log.timestamp).toLocaleString() : '-',
+      log.timestamp ? safeDateDisplay(log.timestamp) : '-',
       log.performedByEmail,
       log.action,
       log.vehicleNumber || '-',
@@ -326,7 +327,7 @@ export function exportToCSV(
   if (options.reportType === 'loads' || options.reportType === 'all') {
     csvContent += '--- KENNEDY TRAILER SERVICES : LOAD REGISTER ---\n';
     csvContent +=
-      'Vehicle Number,Load Company,Loading Point,Destination,Weight (MT),Rate (Rupees),Rate Unit,Calculated Freight (Rupees),Booking Date,Driver Contact,Created By,Entry Date\n';
+      'Vehicle Number,Load Company,Loading Point,Destination,Weight (MT),Rate (Rupees),Rate Unit,Calculated Freight (Rupees),Booking Date,Rest Balance Settled,Settled Amount,Settled Date,Paid By,Driver Contact,Created By,Entry Date\n';
 
     filteredLoads.forEach((l) => {
       csvContent += [
@@ -339,6 +340,10 @@ export function exportToCSV(
         `"${l.rateUnit}"`,
         l.calculatedFreight || 0,
         `"${l.bookingDate}"`,
+        l.isRestBalanceSettled ? '"Yes"' : '"No"',
+        l.restBalanceAmount || 0,
+        `"${l.restBalanceDate || ''}"`,
+        `"${l.restBalancePaidBy || ''}"`,
         `"${l.driverContact || ''}"`,
         `"${l.createdByEmail}"`,
         `"${l.createdAt ? l.createdAt.split('T')[0] : ''}"`,
@@ -351,7 +356,7 @@ export function exportToCSV(
   if (options.reportType === 'advances' || options.reportType === 'all') {
     csvContent += '--- KENNEDY TRAILER SERVICES : ADVANCE PAYMENTS ---\n';
     csvContent +=
-      'Advance Sender,Vehicle Number,Amount (Rupees),Payment Date,Matching Status,Matched Load Reference,Created By,Entry Date\n';
+      'Advance Sender,Vehicle Number,Amount (Rupees),Payment Date,Match Method,Created By,Entry Date\n';
 
     filteredAdvances.forEach((a) => {
       csvContent += [
@@ -359,8 +364,7 @@ export function exportToCSV(
         `"${a.vehicleNumber}"`,
         a.amount,
         `"${a.paymentDate}"`,
-        `"${a.matchingStatus}"`,
-        `"${a.matchedLoadId || 'None'}"`,
+        '"Auto-Matched by Vehicle"',
         `"${a.createdByEmail}"`,
         `"${a.createdAt ? a.createdAt.split('T')[0] : ''}"`,
       ].join(',') + '\n';
@@ -386,43 +390,46 @@ export function exportToCSV(
 
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `Kennedy_Transport_${options.reportType}_${new Date().toISOString().split('T')[0]}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute(
+    'download',
+    `Kennedy_Transport_Data_${options.reportType}_${new Date().toISOString().split('T')[0]}.csv`
+  );
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
 
 // -------------------------------------------------------------
-// JSON Backup & Restore
+// JSON Backup Export & Import
 // -------------------------------------------------------------
 export function exportJSONBackup(
   loads: TransportLoad[],
   advances: AdvanceRecord[],
   activityLogs: ActivityLog[]
 ) {
-  const backupData = {
-    appName: 'Kennedy Transport Desk',
-    company: 'Kennedy Trailer Services',
-    backupVersion: '1.0',
-    exportedAt: new Date().toISOString(),
-    totalLoads: loads.length,
-    totalAdvances: advances.length,
+  const data = {
+    version: '1.0.0',
+    app: 'Kennedy Transport Desk',
+    timestamp: new Date().toISOString(),
     loads,
     advances,
     activityLogs,
   };
 
-  const jsonStr = JSON.stringify(backupData, null, 2);
+  const jsonStr = JSON.stringify(data, null, 2);
   const blob = new Blob([jsonStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `Kennedy_Trailer_Backup_${new Date().toISOString().split('T')[0]}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute(
+    'download',
+    `Kennedy_Transport_Backup_${new Date().toISOString().split('T')[0]}.json`
+  );
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }

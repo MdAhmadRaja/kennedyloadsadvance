@@ -9,7 +9,6 @@ import {
   onSnapshot,
   query,
   orderBy,
-  where,
   limit,
 } from 'firebase/firestore';
 import { db, auth } from './config';
@@ -20,6 +19,7 @@ import {
   AdminPresence,
   RateUnit,
 } from '../types';
+import { cleanVehicleKey } from '../utils/formatUtils';
 
 export enum OperationType {
   CREATE = 'create',
@@ -76,7 +76,6 @@ export function handleFirestoreError(
   }
 }
 
-// Test connection on boot per Firebase skill guidelines
 export async function testConnection(): Promise<boolean> {
   try {
     await getDocFromServer(doc(db, 'system_info', 'connection_check'));
@@ -89,10 +88,10 @@ export async function testConnection(): Promise<boolean> {
   }
 }
 
-// Standardize vehicle number (uppercase, trimmed, normalized spaces)
+// Normalize vehicle number for display and storage
 export function normalizeVehicleNumber(raw: string): string {
   if (!raw) return '';
-  return raw.trim().toUpperCase().replace(/\s+/g, ' ');
+  return cleanVehicleKey(raw);
 }
 
 // Calculate freight based on rate unit
@@ -106,6 +105,37 @@ export function calculateFreight(weight: number, rate: number, rateUnit: RateUni
   return Math.round(Number(rate) || 0);
 }
 
+function toIsoDate(val: any): string {
+  if (!val) return new Date().toISOString();
+  if (typeof val === 'string') return val;
+  if (typeof val === 'object') {
+    if (typeof val.toDate === 'function') {
+      try {
+        return val.toDate().toISOString();
+      } catch {
+        return new Date().toISOString();
+      }
+    }
+    if (typeof val.seconds === 'number') {
+      try {
+        return new Date(val.seconds * 1000).toISOString();
+      } catch {
+        return new Date().toISOString();
+      }
+    }
+  }
+  return String(val);
+}
+
+function toSimpleDate(val: any): string {
+  if (!val) return new Date().toISOString().split('T')[0];
+  if (typeof val === 'string') {
+    return val.includes('T') ? val.split('T')[0] : val;
+  }
+  const iso = toIsoDate(val);
+  return iso.includes('T') ? iso.split('T')[0] : iso;
+}
+
 // Sanitizers to prevent runtime undefined crashes from partially formatted docs
 export function sanitizeLoad(id: string, raw: any): TransportLoad {
   const weight = Number(raw?.weight) || 0;
@@ -116,53 +146,67 @@ export function sanitizeLoad(id: string, raw: any): TransportLoad {
       ? Number(raw.calculatedFreight)
       : calculateFreight(weight, rate, rateUnit);
 
+  const vehicleNum = String(raw?.vehicleNumber || '');
+  const cKey = cleanVehicleKey(vehicleNum || raw?.cleanVehicleKey);
+
   return {
-    id: id || raw?.id || '',
-    vehicleNumber: normalizeVehicleNumber(raw?.vehicleNumber || ''),
-    driverContact: raw?.driverContact || '',
-    loadCompany: raw?.loadCompany || '',
-    loadingPoint: raw?.loadingPoint || '',
-    destination: raw?.destination || '',
+    id: String(id || raw?.id || ''),
+    vehicleNumber: vehicleNum.toUpperCase().trim(),
+    cleanVehicleKey: cKey,
+    driverContact: raw?.driverContact ? String(raw.driverContact) : '',
+    loadCompany: String(raw?.loadCompany || ''),
+    loadingPoint: String(raw?.loadingPoint || ''),
+    destination: String(raw?.destination || ''),
     weight,
     rate,
     rateUnit,
     calculatedFreight,
-    bookingDate: raw?.bookingDate || new Date().toISOString().split('T')[0],
-    createdAt: raw?.createdAt || new Date().toISOString(),
-    createdByEmail: raw?.createdByEmail || 'admin',
-    createdByName: raw?.createdByName || '',
-    updatedAt: raw?.updatedAt || new Date().toISOString(),
-    updatedByEmail: raw?.updatedByEmail || 'admin',
+    bookingDate: toSimpleDate(raw?.bookingDate),
+
+    // Rest Balance
+    isRestBalanceSettled: Boolean(raw?.isRestBalanceSettled),
+    restBalanceAmount: raw?.restBalanceAmount !== undefined ? Number(raw.restBalanceAmount) : undefined,
+    restBalanceDate: raw?.restBalanceDate ? toSimpleDate(raw.restBalanceDate) : undefined,
+    restBalancePaidBy: raw?.restBalancePaidBy ? String(raw.restBalancePaidBy) : undefined,
+    restBalanceNotes: raw?.restBalanceNotes ? String(raw.restBalanceNotes) : undefined,
+
+    createdAt: toIsoDate(raw?.createdAt),
+    createdByEmail: String(raw?.createdByEmail || 'admin'),
+    createdByName: String(raw?.createdByName || ''),
+    updatedAt: toIsoDate(raw?.updatedAt),
+    updatedByEmail: String(raw?.updatedByEmail || 'admin'),
   };
 }
 
 export function sanitizeAdvance(id: string, raw: any): AdvanceRecord {
+  const vehicleNum = String(raw?.vehicleNumber || '');
+  const cKey = cleanVehicleKey(vehicleNum || raw?.cleanVehicleKey);
+
   return {
-    id: id || raw?.id || '',
-    advanceSender: raw?.advanceSender || '',
-    vehicleNumber: normalizeVehicleNumber(raw?.vehicleNumber || ''),
+    id: String(id || raw?.id || ''),
+    advanceSender: String(raw?.advanceSender || ''),
+    vehicleNumber: vehicleNum.toUpperCase().trim(),
+    cleanVehicleKey: cKey,
     amount: Number(raw?.amount) || 0,
-    paymentDate: raw?.paymentDate || new Date().toISOString().split('T')[0],
-    matchingStatus: raw?.matchingStatus || 'unmatched',
-    matchedLoadId: raw?.matchedLoadId || null,
-    possibleLoadIds: Array.isArray(raw?.possibleLoadIds) ? raw.possibleLoadIds : [],
-    createdAt: raw?.createdAt || new Date().toISOString(),
-    createdByEmail: raw?.createdByEmail || 'admin',
-    updatedAt: raw?.updatedAt || new Date().toISOString(),
-    updatedByEmail: raw?.updatedByEmail || 'admin',
+    paymentDate: toSimpleDate(raw?.paymentDate),
+    loadId: raw?.loadId ? String(raw.loadId) : undefined,
+    createdAt: toIsoDate(raw?.createdAt),
+    createdByEmail: String(raw?.createdByEmail || 'admin'),
+    updatedAt: toIsoDate(raw?.updatedAt),
+    updatedByEmail: String(raw?.updatedByEmail || 'admin'),
   };
 }
 
 export function sanitizeActivityLog(id: string, raw: any): ActivityLog {
   return {
-    id: id || raw?.id || '',
+    id: String(id || raw?.id || ''),
     action: raw?.action || 'admin_login',
-    description: raw?.description || '',
+    description: String(raw?.description || ''),
     entityType: raw?.entityType || 'system',
-    entityId: raw?.entityId || '',
-    vehicleNumber: raw?.vehicleNumber ? normalizeVehicleNumber(raw.vehicleNumber) : '',
-    performedByEmail: raw?.performedByEmail || 'admin',
-    timestamp: raw?.timestamp || new Date().toISOString(),
+    entityId: String(raw?.entityId || ''),
+    vehicleNumber: raw?.vehicleNumber ? String(raw.vehicleNumber).toUpperCase().trim() : '',
+    performedByEmail: String(raw?.performedByEmail || 'admin'),
+    timestamp: toIsoDate(raw?.timestamp),
     details: raw?.details || {},
   };
 }
@@ -188,7 +232,7 @@ export async function logActivity(
     description,
     entityType,
     entityId: options?.entityId || '',
-    vehicleNumber: options?.vehicleNumber ? normalizeVehicleNumber(options.vehicleNumber) : '',
+    vehicleNumber: options?.vehicleNumber ? options.vehicleNumber.toUpperCase().trim() : '',
     performedByEmail: userEmail,
     timestamp: new Date().toISOString(),
     details: options?.details || {},
@@ -201,7 +245,6 @@ export async function logActivity(
   }
 }
 
-// Subscribe to activity logs
 export function subscribeToActivityLogs(
   callback: (logs: ActivityLog[]) => void,
   maxEntries = 100
@@ -294,19 +337,31 @@ export function subscribeToLoads(callback: (loads: TransportLoad[]) => void): ()
 }
 
 export async function createLoad(
-  loadInput: Omit<TransportLoad, 'id' | 'createdAt' | 'createdByEmail' | 'updatedAt' | 'updatedByEmail' | 'calculatedFreight'>
-): Promise<{ load: TransportLoad; linkedAdvancesCount: number }> {
+  loadInput: Omit<
+    TransportLoad,
+    | 'id'
+    | 'createdAt'
+    | 'createdByEmail'
+    | 'updatedAt'
+    | 'updatedByEmail'
+    | 'calculatedFreight'
+    | 'cleanVehicleKey'
+  >
+): Promise<TransportLoad> {
   const userEmail = auth.currentUser?.email || 'admin@kennedytrailer.com';
   const loadId = `LOAD_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const normalizedVehicle = normalizeVehicleNumber(loadInput.vehicleNumber);
+  const vehicleUpper = loadInput.vehicleNumber.toUpperCase().trim();
+  const cKey = cleanVehicleKey(vehicleUpper);
   const now = new Date().toISOString();
   const calculatedFreight = calculateFreight(loadInput.weight, loadInput.rate, loadInput.rateUnit);
 
   const newLoad: TransportLoad = {
     ...loadInput,
     id: loadId,
-    vehicleNumber: normalizedVehicle,
+    vehicleNumber: vehicleUpper,
+    cleanVehicleKey: cKey,
     calculatedFreight,
+    isRestBalanceSettled: false,
     createdAt: now,
     createdByEmail: userEmail,
     updatedAt: now,
@@ -321,11 +376,11 @@ export async function createLoad(
 
   await logActivity(
     'create_load',
-    `Added load for vehicle ${normalizedVehicle} (${newLoad.loadCompany}, ${newLoad.loadingPoint} to ${newLoad.destination})`,
+    `Added load for vehicle ${vehicleUpper} (${newLoad.loadCompany}, ${newLoad.loadingPoint} to ${newLoad.destination})`,
     'load',
     {
       entityId: loadId,
-      vehicleNumber: normalizedVehicle,
+      vehicleNumber: vehicleUpper,
       details: {
         weight: newLoad.weight,
         rate: newLoad.rate,
@@ -335,55 +390,7 @@ export async function createLoad(
     }
   );
 
-  // Auto-connect any previously unmatched advance for this vehicle if there's now an obvious match
-  let linkedCount = 0;
-  try {
-    const advancesQuery = query(
-      collection(db, 'advances'),
-      where('vehicleNumber', '==', normalizedVehicle),
-      where('matchingStatus', '==', 'unmatched')
-    );
-    const snap = await getDocs(advancesQuery);
-    if (!snap.empty) {
-      const totalLoadsQuery = query(
-        collection(db, 'loads'),
-        where('vehicleNumber', '==', normalizedVehicle)
-      );
-      const loadsSnap = await getDocs(totalLoadsQuery);
-
-      for (const advDoc of snap.docs) {
-        const advData = sanitizeAdvance(advDoc.id, advDoc.data());
-        if (loadsSnap.size === 1) {
-          await updateDoc(doc(db, 'advances', advData.id), {
-            matchingStatus: 'auto-linked',
-            matchedLoadId: loadId,
-            possibleLoadIds: [loadId],
-            updatedAt: new Date().toISOString(),
-            updatedByEmail: userEmail,
-          });
-          linkedCount++;
-          await logActivity(
-            'match_advance',
-            `Auto-linked advance of ₹${advData.amount} from ${advData.advanceSender} to new load on ${normalizedVehicle}`,
-            'advance',
-            { entityId: advData.id, vehicleNumber: normalizedVehicle }
-          );
-        } else {
-          const possibleIds = loadsSnap.docs.map((d) => d.id);
-          await updateDoc(doc(db, 'advances', advData.id), {
-            matchingStatus: 'multiple-possible',
-            possibleLoadIds: possibleIds,
-            updatedAt: new Date().toISOString(),
-            updatedByEmail: userEmail,
-          });
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Auto-matching check error:', err);
-  }
-
-  return { load: newLoad, linkedAdvancesCount: linkedCount };
+  return newLoad;
 }
 
 export async function updateLoad(
@@ -400,7 +407,9 @@ export async function updateLoad(
   };
 
   if (updates.vehicleNumber) {
-    prepared.vehicleNumber = normalizeVehicleNumber(updates.vehicleNumber);
+    const vUpper = updates.vehicleNumber.toUpperCase().trim();
+    prepared.vehicleNumber = vUpper;
+    prepared.cleanVehicleKey = cleanVehicleKey(vUpper);
   }
 
   if (updates.weight !== undefined || updates.rate !== undefined || updates.rateUnit !== undefined) {
@@ -424,29 +433,82 @@ export async function updateLoad(
   );
 }
 
+// Settle Rest Balance (Destination reached & Load return final settlement)
+export async function settleRestBalance(
+  loadId: string,
+  settlement: {
+    settledAmount: number;
+    settledDate: string;
+    paidBy: string;
+    vehicleNumber: string;
+    notes?: string;
+  }
+): Promise<void> {
+  const userEmail = auth.currentUser?.email || 'admin@kennedytrailer.com';
+  const now = new Date().toISOString();
+
+  const updates = {
+    isRestBalanceSettled: true,
+    restBalanceAmount: Number(settlement.settledAmount) || 0,
+    restBalanceDate: settlement.settledDate,
+    restBalancePaidBy: settlement.paidBy.trim(),
+    restBalanceNotes: settlement.notes?.trim() || '',
+    updatedAt: now,
+    updatedByEmail: userEmail,
+  };
+
+  try {
+    await updateDoc(doc(db, 'loads', loadId), updates);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `loads/${loadId}`, true);
+  }
+
+  await logActivity(
+    'settle_rest_balance',
+    `Settled final rest balance of ₹${settlement.settledAmount} for vehicle ${settlement.vehicleNumber} paid by ${settlement.paidBy}`,
+    'settlement',
+    {
+      entityId: loadId,
+      vehicleNumber: settlement.vehicleNumber,
+      details: settlement,
+    }
+  );
+}
+
+// Reopen / undo rest balance settlement if needed
+export async function reopenRestBalance(loadId: string, vehicleNumber: string): Promise<void> {
+  const userEmail = auth.currentUser?.email || 'admin@kennedytrailer.com';
+  const now = new Date().toISOString();
+
+  const updates = {
+    isRestBalanceSettled: false,
+    restBalanceAmount: null,
+    restBalanceDate: null,
+    restBalancePaidBy: null,
+    restBalanceNotes: null,
+    updatedAt: now,
+    updatedByEmail: userEmail,
+  };
+
+  try {
+    await updateDoc(doc(db, 'loads', loadId), updates);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `loads/${loadId}`, true);
+  }
+
+  await logActivity(
+    'settle_rest_balance',
+    `Reopened rest balance for vehicle ${vehicleNumber} (marked as pending settlement)`,
+    'settlement',
+    { entityId: loadId, vehicleNumber }
+  );
+}
+
 export async function deleteLoad(loadId: string, vehicleNumber: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'loads', loadId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `loads/${loadId}`, true);
-  }
-
-  try {
-    const q = query(
-      collection(db, 'advances'),
-      where('matchedLoadId', '==', loadId)
-    );
-    const snap = await getDocs(q);
-    for (const d of snap.docs) {
-      await updateDoc(doc(db, 'advances', d.id), {
-        matchedLoadId: null,
-        matchingStatus: 'unmatched',
-        updatedAt: new Date().toISOString(),
-        updatedByEmail: auth.currentUser?.email || 'admin',
-      });
-    }
-  } catch (err) {
-    console.warn('Unlink on delete load notice:', err);
   }
 
   await logActivity(
@@ -481,54 +543,22 @@ export async function createAdvance(advanceInput: {
   vehicleNumber: string;
   amount: number;
   paymentDate: string;
-}): Promise<{ advance: AdvanceRecord; autoMatchedLoad: TransportLoad | null; multipleCandidates: TransportLoad[] }> {
+  loadId?: string;
+}): Promise<AdvanceRecord> {
   const userEmail = auth.currentUser?.email || 'admin@kennedytrailer.com';
   const advanceId = `ADV_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const normalizedVehicle = normalizeVehicleNumber(advanceInput.vehicleNumber);
+  const vehicleUpper = advanceInput.vehicleNumber.toUpperCase().trim();
+  const cKey = cleanVehicleKey(vehicleUpper);
   const now = new Date().toISOString();
-
-  let matchingStatus: AdvanceRecord['matchingStatus'] = 'unmatched';
-  let matchedLoadId: string | null = null;
-  let possibleLoadIds: string[] = [];
-  let autoMatchedLoad: TransportLoad | null = null;
-  let multipleCandidates: TransportLoad[] = [];
-
-  try {
-    const loadsQuery = query(
-      collection(db, 'loads'),
-      where('vehicleNumber', '==', normalizedVehicle)
-    );
-    const snap = await getDocs(loadsQuery);
-    const matchingLoads: TransportLoad[] = [];
-    snap.forEach((d) => matchingLoads.push(sanitizeLoad(d.id, d.data())));
-
-    if (matchingLoads.length === 1) {
-      matchingStatus = 'auto-linked';
-      matchedLoadId = matchingLoads[0].id;
-      possibleLoadIds = [matchedLoadId];
-      autoMatchedLoad = matchingLoads[0];
-    } else if (matchingLoads.length > 1) {
-      matchingStatus = 'multiple-possible';
-      possibleLoadIds = matchingLoads.map((l) => l.id);
-      multipleCandidates = matchingLoads;
-    } else {
-      matchingStatus = 'unmatched';
-      matchedLoadId = null;
-      possibleLoadIds = [];
-    }
-  } catch (err) {
-    console.warn('Matching check warning:', err);
-  }
 
   const newAdvance: AdvanceRecord = {
     id: advanceId,
     advanceSender: advanceInput.advanceSender.trim(),
-    vehicleNumber: normalizedVehicle,
+    vehicleNumber: vehicleUpper,
+    cleanVehicleKey: cKey,
     amount: Number(advanceInput.amount) || 0,
     paymentDate: advanceInput.paymentDate,
-    matchingStatus,
-    matchedLoadId,
-    possibleLoadIds,
+    loadId: advanceInput.loadId ? String(advanceInput.loadId) : undefined,
     createdAt: now,
     createdByEmail: userEmail,
     updatedAt: now,
@@ -541,88 +571,21 @@ export async function createAdvance(advanceInput: {
     handleFirestoreError(error, OperationType.CREATE, `advances/${advanceId}`, true);
   }
 
-  const matchDesc =
-    matchingStatus === 'auto-linked'
-      ? `(Auto-linked to load #${matchedLoadId})`
-      : matchingStatus === 'multiple-possible'
-      ? `(Multiple loads found for vehicle)`
-      : `(Unmatched)`;
-
   await logActivity(
     'create_advance',
-    `Recorded advance of ₹${newAdvance.amount} from ${newAdvance.advanceSender} for ${normalizedVehicle} ${matchDesc}`,
+    `Recorded advance of ₹${newAdvance.amount} from ${newAdvance.advanceSender} for vehicle ${vehicleUpper}`,
     'advance',
     {
       entityId: advanceId,
-      vehicleNumber: normalizedVehicle,
+      vehicleNumber: vehicleUpper,
       details: {
         amount: newAdvance.amount,
         sender: newAdvance.advanceSender,
-        matchingStatus,
-        matchedLoadId,
       },
     }
   );
 
-  return {
-    advance: newAdvance,
-    autoMatchedLoad,
-    multipleCandidates,
-  };
-}
-
-export async function linkAdvanceToLoad(
-  advanceId: string,
-  loadId: string,
-  vehicleNumber: string
-): Promise<void> {
-  const userEmail = auth.currentUser?.email || 'admin@kennedytrailer.com';
-  const now = new Date().toISOString();
-
-  try {
-    await updateDoc(doc(db, 'advances', advanceId), {
-      matchedLoadId: loadId,
-      matchingStatus: 'manually-linked',
-      possibleLoadIds: [loadId],
-      updatedAt: now,
-      updatedByEmail: userEmail,
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `advances/${advanceId}`, true);
-  }
-
-  await logActivity(
-    'match_advance',
-    `Manually linked advance to trip load on ${vehicleNumber}`,
-    'advance',
-    { entityId: advanceId, vehicleNumber, details: { matchedLoadId: loadId } }
-  );
-}
-
-export async function unlinkAdvance(
-  advanceId: string,
-  vehicleNumber: string
-): Promise<void> {
-  const userEmail = auth.currentUser?.email || 'admin@kennedytrailer.com';
-  const now = new Date().toISOString();
-
-  try {
-    await updateDoc(doc(db, 'advances', advanceId), {
-      matchedLoadId: null,
-      matchingStatus: 'unmatched',
-      updatedAt: now,
-      updatedByEmail: userEmail,
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `advances/${advanceId}`, true);
-  }
-
-  await logActivity(
-    'unlink_advance',
-    `Unlinked advance on vehicle ${vehicleNumber}`,
-    'advance',
-    { entityId: advanceId, vehicleNumber }
-  );
+  return newAdvance;
 }
 
 export async function updateAdvance(
@@ -639,7 +602,9 @@ export async function updateAdvance(
   };
 
   if (updates.vehicleNumber) {
-    prepared.vehicleNumber = normalizeVehicleNumber(updates.vehicleNumber);
+    const vUpper = updates.vehicleNumber.toUpperCase().trim();
+    prepared.vehicleNumber = vUpper;
+    prepared.cleanVehicleKey = cleanVehicleKey(vUpper);
   }
 
   try {

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { ActivityLog } from '../types';
+import { safeEmailDisplay } from '../utils/formatUtils';
 import {
   History,
   Search,
@@ -17,17 +18,23 @@ interface Props {
   onSelectVehicle: (vehicleNumber: string) => void;
 }
 
-export const ActivityHistory: React.FC<Props> = ({ activityLogs, onSelectVehicle }) => {
+export const ActivityHistory: React.FC<Props> = ({ activityLogs = [], onSelectVehicle }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [actionFilter, setActionFilter] = useState<string>('all');
 
   const filteredLogs = useMemo(() => {
-    return activityLogs.filter((log) => {
+    const term = (searchTerm || '').toLowerCase().trim();
+    return (activityLogs || []).filter((log) => {
+      if (!log) return false;
+      const desc = String(log.description || '').toLowerCase();
+      const email = String(log.performedByEmail || '').toLowerCase();
+      const veh = String(log.vehicleNumber || '').toLowerCase();
+
       const matchSearch =
-        !searchTerm ||
-        log.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        log.performedByEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (log.vehicleNumber && log.vehicleNumber.toLowerCase().includes(searchTerm.toLowerCase()));
+        !term ||
+        desc.includes(term) ||
+        email.includes(term) ||
+        veh.includes(term);
 
       const matchAction = actionFilter === 'all' || log.action === actionFilter;
 
@@ -49,10 +56,8 @@ export const ActivityHistory: React.FC<Props> = ({ activityLogs, onSelectVehicle
         return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">Edit Advance</span>;
       case 'delete_advance':
         return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">Delete Advance</span>;
-      case 'match_advance':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">Match Payment</span>;
-      case 'unlink_advance':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">Unlink Payment</span>;
+      case 'settle_rest_balance':
+        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">Settle Rest Balance</span>;
       case 'backup_export':
         return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-800">Data Export</span>;
       case 'backup_restore':
@@ -119,17 +124,25 @@ export const ActivityHistory: React.FC<Props> = ({ activityLogs, onSelectVehicle
         ) : (
           <div className="divide-y divide-slate-100">
             {filteredLogs.map((log) => {
-              const date = new Date(log.timestamp);
-              const formattedTime = date.toLocaleTimeString('en-IN', {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-              });
-              const formattedDate = date.toLocaleDateString('en-IN', {
-                day: 'numeric',
-                month: 'short',
-                year: 'numeric',
-              });
+              let formattedTime = '-';
+              let formattedDate = '-';
+              try {
+                const date = new Date(log.timestamp);
+                if (!isNaN(date.getTime())) {
+                  formattedTime = date.toLocaleTimeString('en-IN', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                  });
+                  formattedDate = date.toLocaleDateString('en-IN', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                  });
+                }
+              } catch {
+                formattedDate = String(log.timestamp || '-');
+              }
 
               return (
                 <div
@@ -140,7 +153,7 @@ export const ActivityHistory: React.FC<Props> = ({ activityLogs, onSelectVehicle
                     <div className="flex items-center gap-2 flex-wrap">
                       {getActionBadge(log.action)}
                       <span className="text-xs font-semibold text-slate-900">
-                        {log.performedByEmail.split('@')[0]}
+                        {safeEmailDisplay(log.performedByEmail)}
                       </span>
                       <span className="text-[11px] text-slate-400">({log.performedByEmail})</span>
                     </div>

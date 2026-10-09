@@ -2,5 +2,7 @@
   "name": "Kennedy Transport Desk",
   "description": "Simple transport management web app for Kennedy Trailer Services to track loads, advances, vehicle matching, and financial exports.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

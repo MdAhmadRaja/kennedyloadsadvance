@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AdvanceRecord, TransportLoad } from '../types';
-import { createAdvance, updateAdvance, normalizeVehicleNumber } from '../firebase/firestoreService';
-import { X, Banknote, Check, AlertCircle } from 'lucide-react';
+import { createAdvance, updateAdvance } from '../firebase/firestoreService';
+import { cleanVehicleKey, formatVehiclePlate, formatCurrency } from '../utils/formatUtils';
+import { X, Banknote, Check, AlertCircle, Truck } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -9,7 +10,7 @@ interface Props {
   editAdvance?: AdvanceRecord | null;
   onAdvanceSaved?: () => void;
   prefillVehicleNumber?: string;
-  onShowMatchReview?: (advance: AdvanceRecord, candidateLoads: TransportLoad[]) => void;
+  loads?: TransportLoad[];
 }
 
 export const AddAdvanceModal: React.FC<Props> = ({
@@ -17,8 +18,8 @@ export const AddAdvanceModal: React.FC<Props> = ({
   onClose,
   editAdvance,
   onAdvanceSaved,
-  prefillVehicleNumber,
-  onShowMatchReview,
+  prefillVehicleNumber = '',
+  loads = [],
 }) => {
   // Exactly four fields
   const [advanceSender, setAdvanceSender] = useState('');
@@ -28,6 +29,23 @@ export const AddAdvanceModal: React.FC<Props> = ({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Detect active (unsettled) load for this vehicle
+  const activeUnsettledLoad = useMemo(() => {
+    const key = cleanVehicleKey(vehicleNumber);
+    if (!key || !loads.length) return null;
+    // Find the newest unsettled load for this vehicle
+    const vehicleLoads = loads.filter(
+      (l) => cleanVehicleKey(l.vehicleNumber) === key && !l.isRestBalanceSettled
+    );
+    if (vehicleLoads.length === 0) return null;
+    // Sort newest first
+    return [...vehicleLoads].sort((a, b) => {
+      const tA = (a.bookingDate || '') + (a.createdAt || '');
+      const tB = (b.bookingDate || '') + (b.createdAt || '');
+      return tB.localeCompare(tA);
+    })[0];
+  }, [vehicleNumber, loads]);
 
   useEffect(() => {
     if (editAdvance) {
@@ -70,31 +88,26 @@ export const AddAdvanceModal: React.FC<Props> = ({
     setError(null);
 
     try {
+      const vUpper = vehicleNumber.trim().toUpperCase();
       if (editAdvance) {
         await updateAdvance(editAdvance.id, {
           advanceSender: advanceSender.trim(),
-          vehicleNumber: normalizeVehicleNumber(vehicleNumber),
+          vehicleNumber: vUpper,
           amount: numAmount,
           paymentDate,
         });
-        if (onAdvanceSaved) onAdvanceSaved();
-        onClose();
       } else {
-        const result = await createAdvance({
+        await createAdvance({
           advanceSender: advanceSender.trim(),
-          vehicleNumber: normalizeVehicleNumber(vehicleNumber),
+          vehicleNumber: vUpper,
           amount: numAmount,
           paymentDate,
+          loadId: activeUnsettledLoad ? activeUnsettledLoad.id : undefined,
         });
-
-        if (onAdvanceSaved) onAdvanceSaved();
-        onClose();
-
-        // If multiple loads exist for this vehicle, prompt match review screen immediately!
-        if (result.multipleCandidates && result.multipleCandidates.length > 1 && onShowMatchReview) {
-          onShowMatchReview(result.advance, result.multipleCandidates);
-        }
       }
+
+      if (onAdvanceSaved) onAdvanceSaved();
+      onClose();
     } catch (err: any) {
       setError(err?.message || 'Failed to save advance payment. Please try again.');
     } finally {
@@ -160,14 +173,23 @@ export const AddAdvanceModal: React.FC<Props> = ({
             <input
               type="text"
               required
-              placeholder="e.g. MH 12 AB 1234"
+              placeholder="e.g. JH11D0037 or JH11D 0037"
               value={vehicleNumber}
               onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
-              className="w-full px-3 py-2 text-sm font-mono uppercase font-semibold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+              className="w-full px-3 py-2 text-sm font-mono uppercase font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
             />
-            <p className="text-[11px] text-slate-500 mt-1">
-              Advances automatically link to loads for this vehicle.
-            </p>
+            {activeUnsettledLoad ? (
+              <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 text-xs flex items-center gap-1.5">
+                <Truck className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                <span>
+                  Active Load Found: <strong>{activeUnsettledLoad.loadCompany}</strong> ({activeUnsettledLoad.loadingPoint} &rarr; {activeUnsettledLoad.destination}) • Advance will apply to this new trip!
+                </span>
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-500 mt-1">
+                Matched automatically by vehicle number (case & space insensitive). Prevents overlap with completed trips.
+              </p>
+            )}
           </div>
 
           {/* 3. Amount in Rupees */}
